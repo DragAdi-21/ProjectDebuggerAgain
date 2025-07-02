@@ -280,6 +280,54 @@
     }
   }
 
+  /* Enhanced code block styling for chat messages */
+  .chat-code-block {
+    @apply font-mono text-xs leading-relaxed;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    max-width: 100%;
+  }
+
+  .chat-code-block code {
+    @apply block max-w-full;
+    word-break: break-all;
+    white-space: pre-wrap;
+  }
+
+  /* Improved markdown styling */
+  .chat-markdown {
+    @apply max-w-full;
+  }
+
+  .chat-markdown p {
+    @apply mb-2 last:mb-0 break-words;
+  }
+
+  .chat-markdown strong {
+    @apply font-bold text-foreground;
+  }
+
+  .chat-markdown em {
+    @apply italic;
+  }
+
+  .chat-markdown h1, .chat-markdown h2, .chat-markdown h3 {
+    @apply font-bold text-foreground;
+  }
+
+  .chat-markdown ul, .chat-markdown ol {
+    @apply mb-2;
+  }
+
+  .chat-markdown li {
+    @apply break-words;
+  }
+
+  .chat-markdown code {
+    @apply bg-muted/50 px-1 py-0.5 rounded text-xs font-mono;
+  }
+
   /* Responsive text system */
   .text-display {
     @apply text-2xl font-bold leading-tight;

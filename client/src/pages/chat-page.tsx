@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
+import ReactMarkdown from "react-markdown";
 
 // Interface for chat messages
 interface ChatMessage {
@@ -81,20 +82,51 @@ const containerVariants = {
 // Code block component with copy functionality
 const CodeBlock = ({ code, language = "javascript" }: { code: string; language?: string }) => {
   const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
 
   const copyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      toast({
+        title: "✅ Code copied",
+        description: "Code has been copied to clipboard",
+      });
     } catch (err) {
       console.error("Failed to copy code:", err);
+      // Fallback for older browsers
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = code;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+        toast({
+          title: "✅ Code copied",
+          description: "Code has been copied to clipboard",
+        });
+      } catch (fallbackErr) {
+        console.error("Fallback copy failed:", fallbackErr);
+        toast({
+          title: "❌ Copy failed",
+          description: "Unable to copy code to clipboard",
+          variant: "destructive",
+        });
+      }
     }
   };
 
   return (
-    <div className="relative group my-4">
-      <div className="flex items-center justify-between bg-muted/50 px-4 py-2 rounded-t-lg border border-border/50">
+    <div className="relative group my-3 max-w-full">
+      <div className="flex items-center justify-between bg-muted/60 px-3 py-2 rounded-t-lg border border-border/50">
         <span className="text-xs font-mono text-muted-foreground uppercase tracking-wide">
           {language}
         </span>
@@ -102,7 +134,8 @@ const CodeBlock = ({ code, language = "javascript" }: { code: string; language?:
           variant="ghost"
           size="sm"
           onClick={copyToClipboard}
-          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="h-6 w-6 p-0 opacity-70 hover:opacity-100 transition-opacity hover:bg-muted/80"
+          title={copied ? "Copied!" : "Copy code"}
         >
           {copied ? (
             <Check className="h-3 w-3 text-green-500" />
@@ -111,14 +144,16 @@ const CodeBlock = ({ code, language = "javascript" }: { code: string; language?:
           )}
         </Button>
       </div>
-      <pre className="bg-muted/30 border border-t-0 border-border/50 rounded-b-lg p-4 overflow-x-auto">
-        <code className="text-sm font-mono leading-relaxed">{code}</code>
-      </pre>
+      <div className="bg-muted/30 border border-t-0 border-border/50 rounded-b-lg p-3 max-w-full overflow-hidden">
+        <pre className="chat-code-block">
+          <code>{code}</code>
+        </pre>
+      </div>
     </div>
   );
 };
 
-// Enhanced message content renderer
+// Enhanced message content renderer with markdown support
 const MessageContent = ({ content }: { content: string }) => {
   // Parse code blocks and regular text
   const parseContent = (text: string) => {
@@ -160,7 +195,7 @@ const MessageContent = ({ content }: { content: string }) => {
   const parts = parseContent(content);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 max-w-full">
       {parts.map((part, index) => {
         if (part.type === 'code') {
           return (
@@ -172,10 +207,74 @@ const MessageContent = ({ content }: { content: string }) => {
           );
         } else {
           return (
-            <div key={index} className="prose dark:prose-invert max-w-none">
-              <div className="whitespace-pre-wrap text-sm leading-relaxed">
+            <div key={index} className="chat-markdown">
+              <ReactMarkdown
+                components={{
+                  // Custom renderer for inline code to distinguish from code blocks
+                  code: ({ node, ...props }) => {
+                    return (
+                      <code className="bg-muted/50 px-1 py-0.5 rounded text-xs font-mono" {...props} />
+                    );
+                  },
+                  // Ensure paragraphs have proper spacing
+                  p: ({ children }) => (
+                    <p className="text-sm leading-relaxed mb-2 last:mb-0">
+                      {children}
+                    </p>
+                  ),
+                  // Style headings appropriately
+                  h1: ({ children }) => (
+                    <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0">
+                      {children}
+                    </h1>
+                  ),
+                  h2: ({ children }) => (
+                    <h2 className="text-base font-bold mb-2 mt-3 first:mt-0">
+                      {children}
+                    </h2>
+                  ),
+                  h3: ({ children }) => (
+                    <h3 className="text-sm font-bold mb-1 mt-2 first:mt-0">
+                      {children}
+                    </h3>
+                  ),
+                  // Style lists
+                  ul: ({ children }) => (
+                    <ul className="list-disc list-inside text-sm space-y-1 mb-2">
+                      {children}
+                    </ul>
+                  ),
+                  ol: ({ children }) => (
+                    <ol className="list-decimal list-inside text-sm space-y-1 mb-2">
+                      {children}
+                    </ol>
+                  ),
+                  li: ({ children }) => (
+                    <li className="text-sm leading-relaxed">
+                      {children}
+                    </li>
+                  ),
+                  // Style links
+                  a: ({ children, href }) => (
+                    <a 
+                      href={href} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      {children}
+                    </a>
+                  ),
+                  // Style blockquotes
+                  blockquote: ({ children }) => (
+                    <blockquote className="border-l-4 border-muted-foreground/20 pl-4 italic text-muted-foreground text-sm">
+                      {children}
+                    </blockquote>
+                  ),
+                }}
+              >
                 {part.content}
-              </div>
+              </ReactMarkdown>
             </div>
           );
         }
@@ -594,7 +693,7 @@ export default function ChatPage() {
                           message.role === "user" ? "justify-end" : "justify-start"
                         }`}
                       >
-                        <div className={`flex items-start space-x-3 max-w-[85%] lg:max-w-[80%] ${
+                        <div className={`flex items-start space-x-3 max-w-[90%] lg:max-w-[85%] ${
                           message.role === "user" ? "flex-row-reverse space-x-reverse" : ""
                         }`}>
                           {/* Avatar */}
@@ -611,7 +710,7 @@ export default function ChatPage() {
                           </div>
                           
                           {/* Message Content */}
-                          <div className={`rounded-xl p-4 ${
+                          <div className={`rounded-xl p-4 max-w-full overflow-hidden ${
                             message.role === "user"
                               ? "bg-primary text-primary-foreground"
                               : "bg-secondary/50 text-secondary-foreground"
@@ -619,8 +718,8 @@ export default function ChatPage() {
                             {message.role === "assistant" ? (
                               <MessageContent content={message.content} />
                             ) : (
-                              <div className="prose dark:prose-invert max-w-none">
-                                <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                              <div className="max-w-full">
+                                <div className="whitespace-pre-wrap text-sm leading-relaxed break-words">
                                   {message.content}
                                 </div>
                               </div>
