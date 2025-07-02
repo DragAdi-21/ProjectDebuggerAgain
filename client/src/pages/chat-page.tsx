@@ -7,14 +7,43 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Navbar } from "@/components/Navbar";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { Loader2, Send, RefreshCw, Bot, User, Settings } from "lucide-react";
+import { 
+  Loader2, 
+  Send, 
+  RefreshCw, 
+  Bot, 
+  User, 
+  Settings, 
+  Copy, 
+  Check,
+  History,
+  Trash2,
+  MessageSquare,
+  Code2
+} from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation } from "wouter";
+import { 
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator
+} from "@/components/ui/dropdown-menu";
 
 // Interface for chat messages
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  timestamp?: Date;
+}
+
+// Interface for chat history
+interface ChatHistory {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  timestamp: Date;
 }
 
 const messageVariants = {
@@ -28,7 +57,131 @@ const messageVariants = {
       duration: 0.5,
       bounce: 0.3
     }
+  },
+  exit: {
+    opacity: 0,
+    y: -20,
+    scale: 0.95,
+    transition: {
+      duration: 0.3
+    }
   }
+};
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.1
+    }
+  }
+};
+
+// Code block component with copy functionality
+const CodeBlock = ({ code, language = "javascript" }: { code: string; language?: string }) => {
+  const [copied, setCopied] = useState(false);
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy code:", err);
+    }
+  };
+
+  return (
+    <div className="relative group my-4">
+      <div className="flex items-center justify-between bg-muted/50 px-4 py-2 rounded-t-lg border border-border/50">
+        <span className="text-xs font-mono text-muted-foreground uppercase tracking-wide">
+          {language}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={copyToClipboard}
+          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+        >
+          {copied ? (
+            <Check className="h-3 w-3 text-green-500" />
+          ) : (
+            <Copy className="h-3 w-3" />
+          )}
+        </Button>
+      </div>
+      <pre className="bg-muted/30 border border-t-0 border-border/50 rounded-b-lg p-4 overflow-x-auto">
+        <code className="text-sm font-mono leading-relaxed">{code}</code>
+      </pre>
+    </div>
+  );
+};
+
+// Enhanced message content renderer
+const MessageContent = ({ content }: { content: string }) => {
+  // Parse code blocks and regular text
+  const parseContent = (text: string) => {
+    const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = codeBlockRegex.exec(text)) !== null) {
+      // Add text before code block
+      if (match.index > lastIndex) {
+        const beforeText = text.slice(lastIndex, match.index);
+        if (beforeText.trim()) {
+          parts.push({ type: 'text', content: beforeText });
+        }
+      }
+
+      // Add code block
+      parts.push({
+        type: 'code',
+        language: match[1] || 'javascript',
+        content: match[2].trim()
+      });
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      const remainingText = text.slice(lastIndex);
+      if (remainingText.trim()) {
+        parts.push({ type: 'text', content: remainingText });
+      }
+    }
+
+    return parts.length > 0 ? parts : [{ type: 'text', content: text }];
+  };
+
+  const parts = parseContent(content);
+
+  return (
+    <div className="space-y-2">
+      {parts.map((part, index) => {
+        if (part.type === 'code') {
+          return (
+            <CodeBlock
+              key={index}
+              code={part.content}
+              language={part.language}
+            />
+          );
+        } else {
+          return (
+            <div key={index} className="prose dark:prose-invert max-w-none">
+              <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                {part.content}
+              </div>
+            </div>
+          );
+        }
+      })}
+    </div>
+  );
 };
 
 export default function ChatPage() {
@@ -37,11 +190,43 @@ export default function ChatPage() {
   const [, setLocation] = useLocation();
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
   const [systemPrompt, setSystemPrompt] = useState(
     "You are CodeGenius, an AI programming assistant. You're helpful, friendly, and knowledgeable about coding, software development, and technology. Provide accurate, concise answers with code examples when relevant. Be supportive and encouraging, and avoid giving incorrect or misleading information."
   );
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load chat history from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedHistory = localStorage.getItem("chat-history");
+      if (savedHistory) {
+        const parsed = JSON.parse(savedHistory);
+        setChatHistory(parsed.map((h: any) => ({
+          ...h,
+          timestamp: new Date(h.timestamp),
+          messages: h.messages.map((m: any) => ({
+            ...m,
+            timestamp: m.timestamp ? new Date(m.timestamp) : undefined
+          }))
+        })));
+      }
+    } catch (error) {
+      console.error("Failed to load chat history:", error);
+    }
+  }, []);
+
+  // Save chat history to localStorage
+  const saveChatHistory = (history: ChatHistory[]) => {
+    try {
+      localStorage.setItem("chat-history", JSON.stringify(history));
+    } catch (error) {
+      console.error("Failed to save chat history:", error);
+    }
+  };
 
   // Redirect to auth if not authenticated
   useEffect(() => {
@@ -88,7 +273,8 @@ export default function ChatPage() {
       return (await response.json()) as ChatMessage;
     },
     onSuccess: (response) => {
-      setMessages((prev) => [...prev, response]);
+      const newMessage = { ...response, timestamp: new Date() };
+      setMessages((prev) => [...prev, newMessage]);
       toast({
         title: "✅ Response received",
         description: "AI has provided a response",
@@ -115,7 +301,11 @@ export default function ChatPage() {
     }
 
     // Add user message to chat
-    const userMessage: ChatMessage = { role: "user", content: input };
+    const userMessage: ChatMessage = { 
+      role: "user", 
+      content: input,
+      timestamp: new Date()
+    };
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
 
@@ -126,20 +316,67 @@ export default function ChatPage() {
     });
   };
 
-  // Handle key press (Enter to send)
+  // Enhanced mobile-friendly key press handler
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
+    // On mobile and tablets, Enter should send message (not create new line)
+    if (e.key === "Enter") {
+      const isMobile = window.innerWidth < 768;
+      if (isMobile || !e.shiftKey) {
+        e.preventDefault();
+        handleSendMessage();
+      }
     }
   };
 
-  // Clear chat history
-  const handleClearChat = () => {
+  // Enhanced clear chat with animation
+  const handleClearChat = async () => {
+    if (messages.length === 0) return;
+    
+    setIsClearing(true);
+    
+    // Save current chat to history if it has messages
+    if (messages.length > 0) {
+      const chatTitle = messages[0]?.content.slice(0, 50) || "Untitled Chat";
+      const newHistoryItem: ChatHistory = {
+        id: Date.now().toString(),
+        title: chatTitle,
+        messages: [...messages],
+        timestamp: new Date()
+      };
+      
+      const updatedHistory = [newHistoryItem, ...chatHistory].slice(0, 10); // Keep only last 10 chats
+      setChatHistory(updatedHistory);
+      saveChatHistory(updatedHistory);
+    }
+
+    // Animate clearing
+    await new Promise(resolve => setTimeout(resolve, 300));
     setMessages([]);
+    setIsClearing(false);
+    
     toast({
       title: "🗑️ Chat cleared",
-      description: "Conversation history has been cleared",
+      description: "Conversation saved to history and cleared",
+    });
+  };
+
+  // Load chat from history
+  const loadChatFromHistory = (historyItem: ChatHistory) => {
+    setMessages(historyItem.messages);
+    toast({
+      title: "📜 Chat loaded",
+      description: `Loaded "${historyItem.title}"`,
+    });
+  };
+
+  // Delete chat from history
+  const deleteChatFromHistory = (chatId: string) => {
+    const updatedHistory = chatHistory.filter(h => h.id !== chatId);
+    setChatHistory(updatedHistory);
+    saveChatHistory(updatedHistory);
+    toast({
+      title: "🗑️ Chat deleted",
+      description: "Chat removed from history",
     });
   };
 
@@ -147,10 +384,10 @@ export default function ChatPage() {
     <div className="min-h-screen bg-background flex flex-col">
       <Navbar />
       
-      <div className="flex-1 container-fluid py-6 space-y-6">
+      <div className="flex-1 container-mobile py-4 lg:py-6 space-y-4 lg:space-y-6">
         {/* Header */}
         <motion.div 
-          className="flex items-center justify-between"
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
@@ -160,12 +397,12 @@ export default function ChatPage() {
               <Bot className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold">Chat with CodeGenius</h1>
+              <h1 className="text-xl lg:text-2xl font-bold">Chat with CodeGenius</h1>
               <p className="text-sm text-muted-foreground">AI-powered programming assistant</p>
             </div>
           </div>
           
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button 
               variant="outline" 
               size="sm"
@@ -173,17 +410,93 @@ export default function ChatPage() {
               className="glass border-border/50 hover:border-primary/30"
             >
               <Settings className="mr-2 h-4 w-4" />
-              {showSystemPrompt ? "Hide" : "Show"} System Prompt
+              System
             </Button>
+            
+            {/* Chat History Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="glass border-border/50 hover:border-primary/30"
+                  disabled={chatHistory.length === 0}
+                >
+                  <History className="mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">History</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
+                {chatHistory.length === 0 ? (
+                  <DropdownMenuItem disabled>
+                    <MessageSquare className="mr-2 h-4 w-4" />
+                    No chat history
+                  </DropdownMenuItem>
+                ) : (
+                  chatHistory.map((chat) => (
+                    <div key={chat.id} className="flex items-center">
+                      <DropdownMenuItem 
+                        className="flex-1 cursor-pointer"
+                        onClick={() => loadChatFromHistory(chat)}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium truncate">
+                            {chat.title}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {chat.timestamp.toLocaleDateString()}
+                          </div>
+                        </div>
+                      </DropdownMenuItem>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 mx-1"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteChatFromHistory(chat.id);
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+                {chatHistory.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem 
+                      className="text-destructive cursor-pointer"
+                      onClick={() => {
+                        setChatHistory([]);
+                        saveChatHistory([]);
+                        toast({
+                          title: "🗑️ History cleared",
+                          description: "All chat history has been deleted",
+                        });
+                      }}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Clear all history
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            
             <Button 
               variant="outline" 
               size="sm"
               onClick={handleClearChat}
-              disabled={messages.length === 0 || chatMutation.isPending}
+              disabled={messages.length === 0 || chatMutation.isPending || isClearing}
               className="glass border-border/50 hover:border-destructive/30 hover:text-destructive"
             >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Clear Chat
+              {isClearing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">Clear</span>
             </Button>
           </div>
         </motion.div>
@@ -197,7 +510,7 @@ export default function ChatPage() {
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.3 }}
             >
-              <Card className="modern-card">
+              <Card className="card-mobile">
                 <CardHeader>
                   <CardTitle className="text-lg">System Prompt</CardTitle>
                 </CardHeader>
@@ -211,7 +524,7 @@ export default function ChatPage() {
                       value={systemPrompt}
                       onChange={(e) => setSystemPrompt(e.target.value)}
                       rows={4}
-                      className="modern-input resize-none"
+                      className="input-mobile textarea-mobile resize-none"
                       placeholder="Enter system instructions for the AI..."
                     />
                   </div>
@@ -228,9 +541,9 @@ export default function ChatPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
         >
-          <Card className="modern-card h-[calc(100vh-300px)] flex flex-col">
+          <Card className="card-mobile h-[calc(100vh-280px)] lg:h-[calc(100vh-300px)] flex flex-col">
             {/* Chat Messages */}
-            <div className="flex-1 p-6 overflow-y-auto">
+            <div className="flex-1 p-4 lg:p-6 overflow-y-auto">
               {messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center space-y-4">
                   <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
@@ -263,19 +576,25 @@ export default function ChatPage() {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-6">
-                  <AnimatePresence initial={false}>
-                    {messages.map((message, index) => (
+                <motion.div 
+                  className="space-y-6"
+                  variants={containerVariants}
+                  initial="hidden"
+                  animate="visible"
+                >
+                  <AnimatePresence mode="wait">
+                    {!isClearing && messages.map((message, index) => (
                       <motion.div
                         key={index}
                         variants={messageVariants}
                         initial="hidden"
                         animate="visible"
+                        exit="exit"
                         className={`flex ${
                           message.role === "user" ? "justify-end" : "justify-start"
                         }`}
                       >
-                        <div className={`flex items-start space-x-3 max-w-[80%] ${
+                        <div className={`flex items-start space-x-3 max-w-[85%] lg:max-w-[80%] ${
                           message.role === "user" ? "flex-row-reverse space-x-reverse" : ""
                         }`}>
                           {/* Avatar */}
@@ -297,11 +616,15 @@ export default function ChatPage() {
                               ? "bg-primary text-primary-foreground"
                               : "bg-secondary/50 text-secondary-foreground"
                           }`}>
-                            <div className="prose dark:prose-invert max-w-none">
-                              <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                                {message.content}
+                            {message.role === "assistant" ? (
+                              <MessageContent content={message.content} />
+                            ) : (
+                              <div className="prose dark:prose-invert max-w-none">
+                                <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                                  {message.content}
+                                </div>
                               </div>
-                            </div>
+                            )}
                           </div>
                         </div>
                       </motion.div>
@@ -311,8 +634,8 @@ export default function ChatPage() {
                   {/* Loading Message */}
                   {chatMutation.isPending && (
                     <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
                       className="flex justify-start"
                     >
                       <div className="flex items-start space-x-3 max-w-[80%]">
@@ -330,27 +653,28 @@ export default function ChatPage() {
                   )}
                   
                   <div ref={messagesEndRef} />
-                </div>
+                </motion.div>
               )}
             </div>
 
             {/* Input Area */}
-            <div className="p-6 border-t border-border/50">
+            <div className="p-4 lg:p-6 border-t border-border/50">
               <div className="flex gap-3">
                 <div className="flex-1">
                   <Textarea
+                    ref={textareaRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyPress}
-                    placeholder="Type your message... (Press Enter to send, Shift+Enter for new line)"
-                    className="min-h-[60px] resize-none modern-input"
+                    placeholder="Type your message... (Press Enter to send)"
+                    className="min-h-[60px] max-h-32 resize-none input-mobile"
                     disabled={chatMutation.isPending}
                   />
                 </div>
                 <Button
                   onClick={handleSendMessage}
                   disabled={!input.trim() || chatMutation.isPending}
-                  className="btn-primary self-end px-4"
+                  className="btn-primary self-end px-4 min-h-[60px]"
                 >
                   {chatMutation.isPending ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
@@ -358,6 +682,9 @@ export default function ChatPage() {
                     <Send className="h-5 w-5" />
                   )}
                 </Button>
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                Press Enter to send • {messages.length} messages
               </div>
             </div>
           </Card>
